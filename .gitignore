@@ -1,2 +1,9 @@
 #Variables d'environnement et chemins d'accès
 *.env
+# Données brutes
+*.zip
+*.jar
+*.jpg
+*.jpeg
+*.png
+*.csv
