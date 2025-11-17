@@ -7,3 +7,5 @@
 *.jpeg
 *.png
 *.csv
+./datasets/
+INFOS.md
