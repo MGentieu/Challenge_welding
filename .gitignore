@@ -10,3 +10,4 @@
 ./datasets/
 INFOS.md
 Exemple_soumission
+__pycache__/
