@@ -187,8 +187,8 @@ class MyAIComponent(AbstractAIComponent):
     def init_model(self):
         self.model = WeldingQualityModel(num_classes=3, dropout_rate=0.2)
 
-    def load_model(self, config_file=None):
-        """Load the trained model."""
+    """def load_model(self, config_file=None):
+         # Load the trained model.
         ROOT_PATH = Path(__file__).parent.resolve()
         model_path = ROOT_PATH / 'best_model.pth'
 
@@ -234,9 +234,9 @@ class MyAIComponent(AbstractAIComponent):
         # Warmup
         self._warmup_model()
 
-        print(f"✅ AI Component loaded on {self.device}")
+        print(f"✅ AI Component loaded on {self.device}")"""
 
-    def load_specialized_model(self, welding_type):
+    def load_model(self, welding_type):
         """
         Charge un modèle spécialisé en fonction du type de soudure.
         """
