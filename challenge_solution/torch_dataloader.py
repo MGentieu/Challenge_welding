@@ -5,8 +5,37 @@ from typing import Callable, Optional
 import pandas as pd
 from PIL import Image
 import torch
-from torch.utils.data import Dataset, DataLoader
+from torch.utils.data import Dataset
 from torchvision import transforms
+
+
+def train_augmentations():
+    """
+    Pipeline d'augmentations pour les images industrielles.
+    Utilisé uniquement lorsque is_train=True.
+    """
+    return transforms.Compose([
+        transforms.ColorJitter(
+            brightness=0.3,
+            contrast=0.3,
+            saturation=0.2,
+            hue=0.02
+        ),
+        transforms.RandomAdjustSharpness(sharpness_factor=2, p=0.3),
+        transforms.GaussianBlur(kernel_size=(3, 5), sigma=(0.1, 2.0)),
+        transforms.RandomAutocontrast(p=0.3),
+        transforms.RandomEqualize(p=0.2),
+        transforms.RandomPosterize(bits=5, p=0.2),
+        transforms.ToTensor(),
+    ])
+
+
+def test_transform():
+    """Transform minimal sans augmentation."""
+    return transforms.Compose([
+        transforms.ToTensor(),
+    ])
+
 
 class ImageDataFrameDataset(Dataset):
     def __init__(
@@ -18,28 +47,25 @@ class ImageDataFrameDataset(Dataset):
         transform: Optional[Callable] = None,
         label_transform: Optional[Callable] = None,
         channels_first: bool = True,
+        is_train: bool = True,   # <---- NOUVEL ARGUMENT
     ):
         """
-        df : DataFrame contenant au moins les colonnes `path` et `label`
-        root_dir : dossier racine des images (si `path` est relatif)
-        transform : transformations sur l'image (e.g. torchvision.transforms)
-                    Si None, on applique par défaut ToTensor() -> (C,H,W).
-        label_transform : optionnel, pour encoder les labels (e.g. mapping str->int)
-        channels_first : 
-            - True  -> retourne les images au format (C, H, W) (PyTorch standard)
-            - False -> retourne les images au format (H, W, C)
+        df : DataFrame contenant au moins `path` et `label`.
+        is_train : Si True -> ajoute les augmentations.
         """
         self.df = df.reset_index(drop=True)
         self.root_dir = Path(root_dir)
         self.path_col = path_col
         self.label_col = label_col
-        self.transform = transform
         self.label_transform = label_transform
         self.channels_first = channels_first
+        self.is_train = is_train
 
-        # Transform par défaut si rien n'est fourni
-        if self.transform is None:
-            self.transform = transforms.ToTensor()  # PIL -> Tensor (C,H,W), [0,1]
+        # Choix automatique du transform si aucun fourni
+        if transform is None:
+            self.transform = train_augmentations() if is_train else test_transform()
+        else:
+            self.transform = transform
 
     def __len__(self):
         return len(self.df)
@@ -50,31 +76,22 @@ class ImageDataFrameDataset(Dataset):
         img_path = self.root_dir / row[self.path_col]
         label = row[self.label_col]
 
-        # Chargement de l'image avec PIL (H,W,C implicite)
         image = Image.open(img_path).convert("RGB")
-
-        # Application des transforms (souvent -> Tensor (C,H,W) avec ToTensor)
         image = self.transform(image)
 
-        # Réorganisation éventuelle des canaux
+        # Réorganisation des canaux si nécessaire
         if isinstance(image, torch.Tensor) and image.ndim == 3:
-            # image.shape = (C,H,W) ou (H,W,C)
             if self.channels_first:
-                # On veut (C,H,W)
                 if image.shape[0] != 3 and image.shape[-1] == 3:
-                    # Cas où l'image serait (H,W,C) par erreur
                     image = image.permute(2, 0, 1)
             else:
-                # On veut (H,W,C)
                 if image.shape[0] == 3:
-                    # Cas standard torchvision : (C,H,W) -> (H,W,C)
                     image = image.permute(1, 2, 0)
 
-        # Transform label si besoin
+        # Label transform
         if self.label_transform is not None:
             label = self.label_transform(label)
 
-        # Si label est un entier, on le convertit en tensor long
         if not torch.is_tensor(label):
             label = torch.tensor(label, dtype=torch.long)
 
