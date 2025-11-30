@@ -272,7 +272,8 @@ def test_rare_zones_detection():
     
     for i, sample in enumerate(samples):
         base_brightness = int(sample['lum'] * 5)
-        image = np.ones((224, 224, 3), dtype=np.uint8) * base_brightness
+        image = np.ones((224, 224, 3), dtype=np.uint8) * np.uint8(min(base_brightness, 255))
+
         
         cv2.putText(image, f"ID:{sample['id']}", (10, 30), 
                    cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2)
