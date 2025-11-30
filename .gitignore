@@ -8,4 +8,7 @@
 *.png
 *.csv
 *.venv
-__pycache__/
+__pycache__/*
+challenge_solution/__pycache__/
+*.pyc
+challenge_solution/__pycache__/AIComponent.cpython-312.pyc
