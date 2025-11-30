@@ -172,12 +172,23 @@ class MyAIComponent(AbstractAIComponent):
             'confidence_threshold': 0, # <- Tune values
             'uncertainty_threshold': 1, # <- Tune values
             'ood_threshold': 1} # <- Tune values
+        
+        # Dictionnaire des modèles spécialisés par type de soudure
+        self.specialized_models = {}
+        # Types reconnus
+        self.welding_types = ["c20", "c33", "c102"]
+        # Chemins des poids pour chaque type
+        self.model_paths = {
+            "c20": "best_model_type_A.pth",
+            "c33": "best_model_type_B.pth",
+            "c102": "best_model_type_C.pth",
+        }
 
     def init_model(self):
         self.model = WeldingQualityModel(num_classes=3, dropout_rate=0.2)
 
-    def load_model(self, config_file=None):
-        """Load the trained model."""
+    """def load_model(self, config_file=None):
+         # Load the trained model.
         ROOT_PATH = Path(__file__).parent.resolve()
         model_path = ROOT_PATH / 'best_model.pth'
 
@@ -223,43 +234,72 @@ class MyAIComponent(AbstractAIComponent):
         # Warmup
         self._warmup_model()
 
-        print(f"✅ AI Component loaded on {self.device}")
+        print(f"✅ AI Component loaded on {self.device}")"""
+
+    def load_model(self, welding_type):
+        """
+        Charge un modèle spécialisé en fonction du type de soudure.
+        """
+        if welding_type not in self.welding_types:
+            raise ValueError(f"Welding type inconnu : {welding_type}")
+
+        model_path = Path(self.model_paths[welding_type])
+
+        # Initialise le modèle
+        model = WeldingQualityModel(num_classes=3)
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        model.to(device)
+
+        if model_path.exists():
+            ckpt = torch.load(model_path, map_location=device)
+            model.load_state_dict(ckpt["model_state_dict"])
+            print(f"🟢 Modèle spécialisé pour {welding_type} chargé.")
+        else:
+            print(f"⚠️ Aucun modèle trouvé pour {welding_type}, initialisation aléatoire.")
+
+        model.eval()
+
+        self.specialized_models[welding_type] = model
 
     def predict(self, input_images: list[np.ndarray],
                 images_meta_informations: list[dict],**kwargs) -> dict:
         """Make predictions on input images."""
 
-        if self.model is None:
-            raise RuntimeError("Model not loaded. Call load_model() first.")
+        # Récupérer le type de soudure
+        welding_type = images_meta_informations[0].get("type_label", None)
+        if welding_type is None:
+            raise ValueError("type_label est requis pour la prédiction.")
+
+        # Charger le modèle spécialisé si pas déjà chargé
+        if welding_type not in self.specialized_models:
+            self.load_specialized_model(welding_type)
+
+        # Utiliser le modèle spécialisé !
+        model = self.specialized_models[welding_type]
+        device = next(model.parameters()).device  # device du modèle spécialisé
 
         predictions = []
         probabilities = []
         ood_scores = []
 
-        self.model.eval()
+        model.eval()
 
         with torch.no_grad():
             for i, img_array in enumerate(input_images):
                 try:
                     # Preprocess image
                     processed_image = self._preprocess_image(img_array)
-                    img_tensor = processed_image.unsqueeze(0).to(self.device)
+                    img_tensor = processed_image.unsqueeze(0).to(device)
 
                     # Model inference
-                    outputs = self.model(img_tensor)
+                    outputs = model(img_tensor)
 
                     # Extract results
                     probs = outputs['probabilities'][0] # Could be based on postprocessing of outputs['logits']
                     uncertainty = 0
                     ood_score = 0
-                    #embedding = outputs['embedding']
 
-                    # --- Composants optionnels Trustworthy AI  ---
-                    # Faire appelle au méthode predict des modules
-                    # Ex : ood_score = MahalanobisOODDetector.predict(...)
-                    # Ex : uncertainty = TemperatureScaler(...) 
-
-                    # Make safety decision
+                    # Décision finale (avec thresholds)
                     final_prediction, final_probabilities = self._make_safety_decision(probs, uncertainty, ood_score)
 
                     predictions.append(final_prediction)
