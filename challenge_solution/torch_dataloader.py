@@ -110,7 +110,7 @@ class ImageDataFrameDataset(Dataset):
 
     def _prepare_balanced_indices(self):
         indices = []
-        class_counts = self.df['class'].value_counts()
+        class_counts = self.df[self.label_col].value_counts()
         n_ok = class_counts.get('OK', 0)
         n_ko = class_counts.get('KO', 0)
         augmentation_factor = max(1, n_ok // n_ko) if n_ko > 0 else 1
@@ -120,7 +120,7 @@ class ImageDataFrameDataset(Dataset):
             indices.append((idx, False))  # image originale
 
             # Sur-échantillonner KO
-            if row['class'] == 'KO':
+            if row[self.label_col] == 'KO':
                 for _ in range(augmentation_factor - 1):
                     indices.append((idx, True))
 
@@ -137,6 +137,7 @@ class ImageDataFrameDataset(Dataset):
 
         return indices
 
+
     def __len__(self):
         return len(self.indices)
 
@@ -151,12 +152,13 @@ class ImageDataFrameDataset(Dataset):
         # Appliquer WeldingAugmentation si nécessaire
         if self.is_train and should_augment:
             image = self.welding_augmentor.augment_image(
-                image,
-                class_label=row.get("class", None),
-                blur_level=row.get("blur_level", None),
-                luminosity=row.get("luminosity_level", None),
-                seam=row.get("welding-seams", None)
-            )
+            image,
+            class_label=row.get(self.label_col, None),
+            blur_level=row.get("blur_level", None),
+            luminosity=row.get("luminosity_level", None),
+            seam=row.get("welding-seams", None)
+        )
+
 
         # Convertir en PIL pour PyTorch transforms
         image = Image.fromarray(image)
