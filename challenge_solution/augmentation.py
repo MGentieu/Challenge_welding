@@ -17,10 +17,10 @@ import torch
 from torch.utils.data import Dataset
 
 
-class WeldingAugmentation:
+# APRÈS
+class WeldingDataAugmentor:
+    """Pipeline d'augmentation AGRESSIVE pour équilibrage dataset"""
     """
-    Pipeline d'augmentation adapté aux soudures
-    
     Stratégies:
         1. Augmentation de base (toutes images)
         2. Augmentation agressive (classes minoritaires - KO)

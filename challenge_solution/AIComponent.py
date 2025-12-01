@@ -19,6 +19,12 @@ from sklearn.covariance import EmpiricalCovariance
 from scipy.optimize import minimize
 warnings.filterwarnings('ignore')
 
+import sys
+sys.path.append(os.path.dirname(__file__))
+
+from uncertainty import UncertaintyQuantifier
+from ood_detection import OODDetector
+
 # =============================================================================
 # ABSTRACT INTERFACE (Challenge Requirement)
 # =============================================================================
@@ -164,8 +170,14 @@ class MyAIComponent(AbstractAIComponent):
         # Instancié de possible modile complémentaire 
         # Ex : Module OOD basé Sur embdedding du backbone + PCA + Distance pour produire score OOD 
         # Ex : Temperature scaling / Calibration pour ajuster les sorties de probabilités.
-        # 
-        # 
+        
+        
+        #_______________ module ood et incertitude_________________
+        self.uq = None  # Uncertainty Quantifier
+        self.ood_detector = None  # OOD Detector
+        self.train_features = None  # Pour stocker features d'entraînement
+        self.train_logits = None
+        #_________________________________________________________________
 
         # Safety thresholds for decision making -> Mettre en place un module pour determiner le threshold 
         self.safety_thresholds = {
@@ -224,58 +236,149 @@ class MyAIComponent(AbstractAIComponent):
         self._warmup_model()
 
         print(f"✅ AI Component loaded on {self.device}")
+    
+    # ______Initialiser Trustworthy AI Modules_____
+        print("🔧 Initializing Trustworthy AI modules...")
+        
+        # 1. Uncertainty Quantifier
+        self.uq = UncertaintyQuantifier(
+            model=self.model,
+            device=self.device,
+            method='mc_dropout',
+            n_iterations=30
+        )
+        
+        # 2. OOD Detector
+        self.ood_detector = OODDetector(
+            methods=['mahalanobis', 'isolation_forest', 'energy']
+        )
+        
+        # 3. Charger features/logits d'entraînement si disponibles
+        features_path = ROOT_PATH / 'train_features.npy'
+        logits_path = ROOT_PATH / 'train_logits.npy'
+        
+        if features_path.exists() and logits_path.exists():
+            print("📂 Loading training features and logits...")
+            self.train_features = np.load(features_path)
+            self.train_logits = np.load(logits_path)
+            
+            # Fit OOD detector
+            self.ood_detector.fit(
+                train_features=self.train_features,
+                train_logits=self.train_logits,
+                contamination=0.05
+            )
+            print("✅ OOD detector fitted")
+        else:
+            print("⚠️  Training features not found. OOD detection will be disabled.")
+        
+        print("✅ Trustworthy AI modules initialized")
 
+        # Warmup
+        self._warmup_model()
+        #___________________________________________________________
+    #___________________prediction avec trutworthy ai__________________________
     def predict(self, input_images: list[np.ndarray],
-                images_meta_informations: list[dict],**kwargs) -> dict:
-        """Make predictions on input images."""
-
-        if self.model is None:
-            raise RuntimeError("Model not loaded. Call load_model() first.")
-
-        predictions = []
-        probabilities = []
-        ood_scores = []
-
-        self.model.eval()
+                images_meta_informations: list[dict],device: str = 'cuda') -> dict:
+        """
+        Make predictions using the AI component with uncertainty quantification and OOD detection.
+        
+        Returns:
+            A dict containing:
+                - predictions: List of predictions ["OK", "KO", "UNKNOWN"]
+                - probabilities: List of 3-value lists [proba_KO, proba_OK, proba_UNKNOWN]
+                - OOD_scores: List of OOD scores (optional)
+                - epistemic_uncertainty: List of epistemic uncertainty values
+                - aleatoric_uncertainty: List of aleatoric uncertainty values
+        """
+        if not input_images:
+            return {
+                "predictions": [],
+                "probabilities": [],
+                "OOD_scores": [],
+                "epistemic_uncertainty": [],
+                "aleatoric_uncertainty": []
+            }
+        
+        # Preprocessing
+        processed_batch = []
+        for img in input_images:
+            if img.dtype != np.uint8:
+                img = (img * 255).astype(np.uint8)
+            processed_img = self.preprocess(img)
+            processed_batch.append(processed_img)
+        
+        batch_tensor = torch.stack(processed_batch).to(self.device)
 
         with torch.no_grad():
-            for i, img_array in enumerate(input_images):
-                try:
-                    # Preprocess image
-                    processed_image = self._preprocess_image(img_array)
-                    img_tensor = processed_image.unsqueeze(0).to(self.device)
-
-                    # Model inference
-                    outputs = self.model(img_tensor)
-
-                    # Extract results
-                    probs = outputs['probabilities'][0] # Could be based on postprocessing of outputs['logits']
-                    uncertainty = 0
-                    ood_score = 0
-                    #embedding = outputs['embedding']
-
-                    # --- Composants optionnels Trustworthy AI  ---
-                    # Faire appelle au méthode predict des modules
-                    # Ex : ood_score = MahalanobisOODDetector.predict(...)
-                    # Ex : uncertainty = TemperatureScaler(...) 
-
-                    # Make safety decision
-                    final_prediction, final_probabilities = self._make_safety_decision(probs, uncertainty, ood_score)
-
-                    predictions.append(final_prediction)
-                    probabilities.append(final_probabilities)
-                    ood_scores.append(max(0.0, ood_score))
-
-                except Exception as e:
-                    print(f"⚠️  Error processing image {i}: {e}")
-                    predictions.append('UNKNOWN')
-                    probabilities.append([0.1, 0.1, 0.8])
-                    ood_scores.append(2.0)
-
+            # 1. Prédiction de base
+            outputs = self.model(batch_tensor)
+            logits = outputs['logits']
+            embeddings = outputs['embedding']
+            
+            # 2. Incertitude (MC Dropout)
+            if self.uq is not None:
+                unc_results = self.uq.predict_with_uncertainty(batch_tensor)
+                calibrated_probs = unc_results['predictions']
+                epistemic_unc = unc_results['epistemic_uncertainty']
+                aleatoric_unc = unc_results['aleatoric_uncertainty']
+            else:
+                # Fallback si pas d'uncertainty quantifier
+                calibrated_probs = F.softmax(logits, dim=1).cpu().numpy()
+                epistemic_unc = np.zeros(len(input_images))
+                aleatoric_unc = np.zeros(len(input_images))
+            
+            # 3. OOD Detection
+            if self.ood_detector is not None and self.ood_detector.fitted:
+                ood_results = self.ood_detector.detect(
+                    test_features=embeddings.cpu().numpy(),
+                    test_logits=logits.cpu().numpy(),
+                    test_probs=calibrated_probs
+                )
+                ood_scores = ood_results['ensemble']['scores']
+            else:
+                # Fallback si pas d'OOD detector
+                ood_scores = np.zeros(len(input_images))
+        # ===================================================================
+        
+        # Convertir en format attendu
+        predictions = []
+        probabilities = []
+        
+        for i in range(len(input_images)):
+            pred_idx = np.argmax(calibrated_probs[i])
+            confidence = calibrated_probs[i][pred_idx]
+            
+            # Décision finale basée sur incertitude et OOD
+            is_uncertain = (epistemic_unc[i] > self.safety_thresholds['uncertainty_threshold'])
+            is_ood = (ood_scores[i] > self.safety_thresholds['ood_threshold'])
+            is_low_conf = (confidence < self.safety_thresholds['confidence_threshold'])
+            
+            if is_uncertain or is_ood or is_low_conf:
+                # Marquer comme UNKNOWN si trop incertain ou OOD
+                predictions.append("UNKNOWN")
+                probs = [
+                    calibrated_probs[i][1],  # KO
+                    calibrated_probs[i][0],  # OK
+                    1.0 - confidence         # UNKNOWN (1 - max confidence)
+                ]
+            else:
+                # Prédiction normale
+                predictions.append(self.class_names[pred_idx])
+                probs = [
+                    calibrated_probs[i][1],  # KO
+                    calibrated_probs[i][0],  # OK
+                    0.0                       # UNKNOWN
+                ]
+            
+            probabilities.append(probs)
+        
         return {
             "predictions": predictions,
             "probabilities": probabilities,
-            "OOD_scores": ood_scores
+            "OOD_scores": ood_scores.tolist(),
+            "epistemic_uncertainty": epistemic_unc.tolist(),
+            "aleatoric_uncertainty": aleatoric_unc.tolist()
         }
 
     def _preprocess_image(self, img_array):
