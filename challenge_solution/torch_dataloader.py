@@ -8,6 +8,7 @@ import torch
 from torch.utils.data import Dataset
 from torchvision import transforms
 from augmentation import WeldingAugmentation
+from torchvision.transforms import InterpolationMode
 
 def train_augmentations():
     """
@@ -36,7 +37,7 @@ def test_transform():
         transforms.ToTensor(),
     ])
 
-class ImageDataFrameBalancedDataset(Dataset):
+class ImageDataFrameDataset(Dataset):
     """
     Dataset PyTorch qui combine :
       - WeldinAugmentation (base, agressive, rare_zones)
@@ -65,8 +66,6 @@ class ImageDataFrameBalancedDataset(Dataset):
         # Augmenteur Welding
         self.welding_augmentor = WeldingAugmentation(mode=welding_mode)
 
-        # Transform PyTorch
-        from torchvision import transforms
         if is_train:
             self.transform = transforms.Compose([
                 transforms.ColorJitter(brightness=0.3, contrast=0.3, saturation=0.2, hue=0.02),
@@ -75,10 +74,36 @@ class ImageDataFrameBalancedDataset(Dataset):
                 transforms.RandomAutocontrast(p=0.3),
                 transforms.RandomEqualize(p=0.2),
                 transforms.RandomPosterize(bits=5, p=0.2),
+
+                # --- Ajout des transformations demandées ---
+                transforms.Resize(
+                    size=(224, 224),
+                    interpolation=InterpolationMode.BILINEAR,
+                    max_size=None,
+                    antialias=True
+                ),
                 transforms.ToTensor(),
+                transforms.Normalize(
+                    mean=[0.485, 0.456, 0.406],
+                    std=[0.229, 0.224, 0.225]
+                )
             ])
         else:
-            self.transform = transforms.Compose([transforms.ToTensor()])
+            # Mode validation/test → uniquement resize + normalisation (comme demandé)
+            self.transform = transforms.Compose([
+                transforms.Resize(
+                    size=(224, 224),
+                    interpolation=InterpolationMode.BILINEAR,
+                    max_size=None,
+                    antialias=True
+                ),
+                transforms.ToTensor(),
+                transforms.Normalize(
+                    mean=[0.485, 0.456, 0.406],
+                    std=[0.229, 0.224, 0.225]
+                )
+            ])
+
 
         # Préparer indices avec sur-échantillonnage KO et zones rares
         self.indices = self._prepare_balanced_indices()
