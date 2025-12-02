@@ -2,13 +2,13 @@
 
 ### Noms des contributeurs :
 
-GENTIEU Martin
-ROUSSELET Philéas
-GUERMOUCH Kenza
-JEBBARI Fatima
-ROBERT Mathias
-ALLIOUI Najlaa
-SHANIN Sarah
+- GENTIEU Martin
+- ROUSSELET Philéas
+- GUERMOUCH Kenza
+- JEBBARI Fatima
+- ROBERT Mathias
+- ALLIOUI Najlaa
+- SHANIN Sarah
 
 ### Explication globale
 
