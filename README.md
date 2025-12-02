@@ -1,3 +1,10 @@
+# Pour M. Pasini :
+
+Les explications globales du code sont données dans le fichier **README_PASINI.md**
+
+Les explications détaillées des modules (dataloader, augmentation, autre modèle utilisé) sont dans les fichiers markdown du dossier **challenge_solution**
+
+
 # challenge-welding-reference-solution-1
 
 This repository contains the code of a naive reference solution proposed for the Welding Quality Detection challenge. This solution is provided as a pedagogical example only and should not be considered a benchmark in terms of performance.
