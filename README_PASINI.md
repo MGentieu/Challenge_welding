@@ -53,6 +53,8 @@ Une option a également été mise en place pour générer soit un dataset d'ent
 
 Cela permet lors de l'implémentation d'avoir uniquement à appelé ces deux fonctions pour obtenir des datasets prêts à l'emploi pour les modèles pytorch.
 
+### OOD detection
+
 ### Autre modèle
 
 
